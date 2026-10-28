@@ -17,7 +17,7 @@ from .media_sources import SCANNABLE_LOCATIONS
 from .organize_templates import PLACEHOLDERS, TemplateError, example_path, validate_template
 from .platform import location_roots
 from .scripting import verify_after_write
-from .web_settings import organize_templates
+from .web_settings import organize_schemes, organize_templates
 
 #: 界面上能整理的来源。`online` 是追更抓来的东西，不在任何一个媒体根下面。
 ORGANIZE_LOCATIONS = SCANNABLE_LOCATIONS
@@ -50,9 +50,11 @@ def q_organize(contract, _args=None) -> dict:
         "locations": [{"location": location, "roots": list(declared.get(location, ()))}
                       for location in ORGANIZE_LOCATIONS if declared.get(location)],
         "templates": organize_templates(contract),
+        "schemes": organize_schemes(contract),
         "presets": [dict(preset) for preset in organize.PRESETS],
         "placeholders": [{"key": key, "label": label} for key, label in PLACEHOLDERS.items()],
         "last_batch": latest.name if latest else "",
+        "batches": organize.list_batches(contract.candidate_root),
     }
 
 
@@ -146,14 +148,25 @@ def w_organize_apply(contract, body) -> dict:
 
 
 def w_organize_rollback(contract, body) -> dict:
-    """把上一批整理原样退回去。"""
+    """把一批整理原样退回去：指定了 `batch` 就退那一批，没指定就退上一批。"""
     if body.get("confirm") is not True:
         raise ValueError("回滚需要确认")
     from .job_recovery import current_job_id, read
     saved = read(contract.db_path, 'organize') if current_job_id.get() else {}
-    batch = (saved.get('checkpoint') or {}).get('rollback_batch')
-    latest = (organize.batch_log_dir(contract.candidate_root) / batch if batch
-              else organize.latest_batch(contract.candidate_root))
+    requested = body.get("batch")
+    explicit = isinstance(requested, str) and bool(requested.strip())
+    if explicit:
+        # 指定的批次名只许是批次目录里一个真实存在的文件名本身：带路径分隔、
+        # 不是 `.json` 结尾、或者目录里根本没有，都直接拒绝，不猜、不回退到上一批。
+        name = requested.strip()
+        candidate = organize.batch_log_dir(contract.candidate_root) / name
+        if Path(name).name != name or not name.endswith(".json") or not candidate.is_file():
+            raise ValueError(f"没有这个整理批次：{name}")
+        latest = candidate
+    else:
+        batch = (saved.get('checkpoint') or {}).get('rollback_batch')
+        latest = (organize.batch_log_dir(contract.candidate_root) / batch if batch
+                  else organize.latest_batch(contract.candidate_root))
     if latest is None:
         raise ValueError("没有可以回滚的批次")
     job = contract.organize_job
@@ -169,8 +182,9 @@ def w_organize_rollback(contract, body) -> dict:
         job.update(job_id, **result, status="complete", completed_at=time.time())
 
     return job.start(work, restart=True,
-                     initial={"stage": "正在回滚上一批", "batch": latest.name},
-                     recovery={'confirm': True, 'action': 'rollback'})
+                     initial={"stage": "正在回滚整理批次", "batch": latest.name},
+                     recovery={'confirm': True, 'action': 'rollback',
+                               **({'batch': latest.name} if explicit else {})})
 
 
 __all__ = ["ORGANIZE_LOCATIONS", "TemplateError", "q_organize", "w_organize_apply",

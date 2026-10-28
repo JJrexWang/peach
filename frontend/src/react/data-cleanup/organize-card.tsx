@@ -24,13 +24,13 @@ import { FolderSearchIcon } from '../settings/folder-rows';
 import { busyProps } from '../settings/use-action';
 import {
   baseName, DIRECTORY_TEMPLATE_ERROR, fetchOrganize, fetchOrganizeExample, ORGANIZE_KEY, organizeOutcome, planSummary,
-  pickOrganizeFolder, previewOrganize, rememberTemplates, startOrganize, withOrganizeJob,
-  type OrganizeCommand, type OrganizeData, type OrganizeJob, type OrganizePlan,
+  pickOrganizeFolder, previewOrganize, rememberTemplates, saveOrganizeSchemes, startOrganize, withOrganizeJob,
+  type OrganizeCommand, type OrganizeData, type OrganizeJob, type OrganizePlan, type OrganizeScheme,
 } from './organize';
 
 const APPLY_BODY = (name: string, path: string) => `将整理「${name}」${path ? `的「${path}」及其子目录` : '上的文件名与目录'}，清理特殊符号与乱码，并按已填模板改名或移动。目标已存在的行会整行跳过。`
-  + '这一批可以从「回滚上一批」整批退回。';
-const ROLLBACK_BODY = '将把上一批整理动过的文件退回整理前的名字与位置，数据库路径跟着退回。'
+  + '这一批会记进批次列表，之后可以整批退回。';
+const ROLLBACK_BODY = (batch: string) => `将把批次「${batch}」整理动过的文件退回整理前的名字与位置，数据库路径跟着退回。`
   + '退回后这一批不再出现在这里。';
 /** 预览只列前 8 行：这里是给人扫一眼方向对不对，完整计划在 CSV 里。 */
 const PLAN_ROWS = 8;
@@ -168,10 +168,53 @@ export function OrganizeCard(
       },
     });
   };
-  const runRollback = () => void confirmModal({
-    title: '回滚上一批整理', body: ROLLBACK_BODY, confirmLabel: '回滚整理',
-    onConfirm: () => job.start.mutateAsync({ kind: 'rollback' }),
-  });
+  /* 历史批次：服务端列表最新在前；老数据没有列表时退回只认上一批。 */
+  const batches = data?.batches?.length ? data.batches : data?.last_batch ? [data.last_batch] : [];
+  const [batchChoice, setBatchChoice] = useState('');
+  const selectedBatch = batches.includes(batchChoice) ? batchChoice : batches[0] ?? '';
+  const runRollback = () => {
+    if (!selectedBatch) return;
+    void confirmModal({
+      title: '回滚整理批次', body: ROLLBACK_BODY(selectedBatch), confirmLabel: '回滚整理',
+      onConfirm: () => job.start.mutateAsync({ kind: 'rollback', batch: selectedBatch }),
+    });
+  };
+
+  /* 我的方案：把当前两份模板连名字存进设置，之后一键填回。整表回写，写失败报出来。 */
+  const schemes = data?.schemes ?? [];
+  const [schemeName, setSchemeName] = useState('');
+  const [schemeBusy, setSchemeBusy] = useState(false);
+  const applyScheme = (scheme: OrganizeScheme) => {
+    changeTemplates({ file: scheme.file, dir: scheme.dir });
+    focused.current = false;
+  };
+  const saveSchemes = async (next: OrganizeScheme[], done: string) => {
+    setSchemeBusy(true);
+    try {
+      await saveOrganizeSchemes(next);
+      toast(done);
+    } catch (cause) {
+      failure('保存命名方案', cause);
+    } finally {
+      setSchemeBusy(false);
+    }
+  };
+  const saveScheme = () => {
+    const name = schemeName.trim();
+    if (!name || schemeBusy) return;
+    if (!fields.file.trim() && !fields.dir.trim()) {
+      failure('保存命名方案', new Error('当前两份模板都是空的，没有可存的内容'));
+      return;
+    }
+    const next = [...schemes.filter((scheme) => scheme.name !== name),
+      { name, file: fields.file.trim(), dir: fields.dir.trim() }];
+    setSchemeName('');
+    void saveSchemes(next, `已保存方案「${name}」`);
+  };
+  const removeScheme = (name: string) => {
+    if (schemeBusy) return;
+    void saveSchemes(schemes.filter((scheme) => scheme.name !== name), `已删除方案「${name}」`);
+  };
 
   /* 这张卡上的结论只有一句：跑着的那一趟、这次跟完的那一趟、刚出的预览，按新旧取最新。 */
   let state = null;
@@ -201,8 +244,16 @@ export function OrganizeCard(
       attributes={{ 'data-cleanup-organize': '' }}
       footer={
         <>
-          {data?.last_batch
-            ? <Button variant="secondary" {...busyProps(running)} onClick={runRollback}>回滚上一批</Button>
+          {batches.length
+            ? <>
+                <Select aria-label="回滚哪个批次" className="w-fit" selectedKey={selectedBatch || null}
+                  onSelectionChange={(key) => { if (key !== null) setBatchChoice(String(key)) }}>
+                  {batches.map((batch) => (
+                    <SelectItem key={batch} id={batch} textValue={batch}>{batch}</SelectItem>
+                  ))}
+                </Select>
+                <Button variant="secondary" {...busyProps(running)} onClick={runRollback}>回滚所选批次</Button>
+              </>
             : null}
           <Button variant={applicable ? 'secondary' : 'primary'} disabled={!locations.length || running}
             {...busyProps(preview.isPending)} onClick={runPreview}>预览</Button>
@@ -265,6 +316,31 @@ export function OrganizeCard(
               </div>
             </div>
           : null}
+        <div className="flex flex-col gap-2" role="group" aria-label="我的方案">
+          <p className="text-caption-1-medium text-text-secondary">我的方案</p>
+          {schemes.length
+            ? <div className="flex flex-wrap gap-2">
+                {schemes.map((scheme) => (
+                  <span key={scheme.name} className="inline-flex items-center gap-1">
+                    <Button variant="secondary" size="small" title={`${scheme.file}${scheme.dir ? ` / ${scheme.dir}` : ''}`}
+                      className="max-w-full [&>span]:min-w-0 [&>span]:shrink"
+                      onClick={() => applyScheme(scheme)}>
+                      <span className="truncate">{scheme.name}</span>
+                    </Button>
+                    <Button variant="ghost" size="small" aria-label={`删除方案「${scheme.name}」`}
+                      {...busyProps(schemeBusy)} onClick={() => removeScheme(scheme.name)}>删除</Button>
+                  </span>
+                ))}
+              </div>
+            : null}
+          <div className="flex min-w-0 flex-wrap items-start gap-2">
+            <Input aria-label="方案名称" placeholder="给当前模板起个名字" className="min-w-0 basis-48 flex-1"
+              name="organize-scheme-name" autoComplete="off" value={schemeName}
+              onChange={(value) => setSchemeName(value)} />
+            <Button variant="secondary" size="small" disabled={!schemeName.trim()}
+              {...busyProps(schemeBusy)} onClick={saveScheme}>保存当前为方案</Button>
+          </div>
+        </div>
         <p aria-live="polite" aria-busy={example.isFetching} data-organize-example=""
           className="text-caption-1-regular text-text-secondary">
           路径示例：<code className="wrap-anywhere">{example.data?.example || example.data?.error

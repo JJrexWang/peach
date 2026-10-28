@@ -20,6 +20,7 @@ import { GeneralSettings } from './general-settings';
 import { MaintenanceSettings } from './maintenance-settings';
 import { MediaSettings } from './media-settings';
 import { MediaProcessingSettings, PlaybackTranscodeSettings } from './media-processing-settings';
+import { HotkeySettings } from './hotkey-settings';
 import { CodePatternSettings } from './code-pattern-settings';
 import { NetworkSettings } from './network-settings';
 import { SourceSettings } from './source-settings';
@@ -129,6 +130,7 @@ function ConfigurationGroups(
         {issues(['startup', 'uninstall', 'storage', 'remote_reporting', 'library_sharing', 'updates', 'update_job', 'automatic_updates', 'facts'])}
         <GeneralSettings {...group} />
         <PlaybackTranscodeSettings receipt={receipt} />
+        <HotkeySettings receipt={receipt} />
         <MaintenanceSettings {...group} reopenTutorial={reopenTutorial} />
       </div>,
     },

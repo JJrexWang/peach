@@ -188,5 +188,15 @@ export const createV10Player: VideojsFactory = (video, options) => {
       node.srclang = String(track.srclang || ''); node.label = String(track.label || ''); video.append(node);
     },
   } satisfies VjsPlayer;
+  /* `userActions.hotkeys` 是 Video.js 的配置口径，这个适配层自己实现它：
+   * 处理函数以播放器为 `this` 在播放器根元素上收 keydown。根元素要能拿到焦点，
+   * 否则点过视频之后按键还是落在 body 上——点播放器任意处就把焦点收回根元素。 */
+  const hotkeys = (options as { userActions?: { hotkeys?: unknown } }).userActions?.hotkeys;
+  if (typeof hotkeys === 'function') {
+    const handler = hotkeys as (this: VjsPlayer, event: KeyboardEvent) => void;
+    root.tabIndex = -1;
+    root.addEventListener('pointerdown', () => root.focus({ preventScroll: true }), { signal });
+    root.addEventListener('keydown', (event) => handler.call(player, event), { signal });
+  }
   return player;
 };

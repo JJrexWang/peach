@@ -55,7 +55,7 @@ SEARCH_HISTORY_LIMIT_MAX = 50
 #: 番号识别规则描述的是这套馆藏的命名，处理任务按它往账本里写番号，同样跟着账本走。
 SYNCED_SETTING_KEYS = frozenset({
     "sidebarOrder", "followInitialDays", "postSetupTutorialDone",
-    "organizeTemplates", "feedHideGroupCompilations", "feedHideSoloCompilations",
+    "organizeTemplates", "organizeSchemes", "feedHideGroupCompilations", "feedHideSoloCompilations",
     "feedHideExcerpts", "searchHistoryLimit", "codePatterns",
 })
 #: 三个收起开关的键与各自对应的那一类，缺省值取 `feeds.DEFAULT_HIDDEN_COMPILATIONS`。
@@ -151,6 +151,53 @@ def organize_templates(contract: SettingsContract) -> dict:
     return normalise_organize_templates(_stored(contract).get("organizeTemplates"))
 
 
+#: 一套命名方案的名字上限与存档条数上限。方案就是两份模板加一个名字，
+#: 超过这个量级说明在拿存档当别的东西用。
+ORGANIZE_SCHEME_NAME_MAX = 50
+ORGANIZE_SCHEMES_MAX = 50
+
+
+def normalise_organize_schemes(raw) -> list[dict]:
+    """收敛命名方案存档：`[{name, file, dir}]`。
+
+    名字去空白后必须非空且不重复（先存的优先）；两份模板都空的方案没有意义，丢掉。
+    模板校验与单份模板同一道门槛：不合法抛 `TemplateError` 给用户看。
+    """
+    from .organize_templates import validate_template
+    if not isinstance(raw, list):
+        return []
+    clean: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name or len(name) > ORGANIZE_SCHEME_NAME_MAX or name in seen:
+            continue
+        file_template = validate_template(str(entry.get("file") or ""))
+        dir_template = validate_template(str(entry.get("dir") or ""), directory=True)
+        if not file_template and not dir_template:
+            continue
+        seen.add(name)
+        clean.append({"name": name, "file": file_template, "dir": dir_template})
+        if len(clean) >= ORGANIZE_SCHEMES_MAX:
+            break
+    return clean
+
+
+def _stored_organize_schemes(payload: dict) -> list[dict]:
+    """存进去之后又被手改坏的方案当没存过：整理页照常打开，不因此中断。"""
+    try:
+        return normalise_organize_schemes(payload.get("organizeSchemes"))
+    except (TypeError, ValueError):
+        return []
+
+
+def organize_schemes(contract: SettingsContract) -> list[dict]:
+    """服务端读到的命名方案存档。没存过就是空列表。"""
+    return _stored_organize_schemes(_stored(contract))
+
+
 def normalise_code_patterns(raw) -> list[str]:
     """收敛番号识别规则：一组正则，去掉空行。
 
@@ -206,6 +253,7 @@ def q_settings(contract: SettingsContract, _args=None) -> dict:
         "followInitialDays": normalise_follow_initial_days(payload.get("followInitialDays")),
         "postSetupTutorialDone": payload.get("postSetupTutorialDone") is True,
         "organizeTemplates": normalise_organize_templates(payload.get("organizeTemplates")),
+        "organizeSchemes": _stored_organize_schemes(payload),
         "codePatterns": _stored_code_patterns(payload),
         **_feed_switches(payload),
         "searchHistoryLimit": normalise_search_history_limit(payload.get("searchHistoryLimit")),
@@ -235,6 +283,8 @@ def w_settings(contract: SettingsContract, body) -> dict:
         merged["postSetupTutorialDone"] = body["postSetupTutorialDone"] is True
     if "organizeTemplates" in body:
         merged["organizeTemplates"] = normalise_organize_templates(body["organizeTemplates"])
+    if "organizeSchemes" in body:
+        merged["organizeSchemes"] = normalise_organize_schemes(body["organizeSchemes"])
     if "codePatterns" in body:
         merged["codePatterns"] = normalise_code_patterns(body["codePatterns"])
     if "searchHistoryLimit" in body:

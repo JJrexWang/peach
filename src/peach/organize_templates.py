@@ -33,11 +33,21 @@ PLACEHOLDERS: dict[str, str] = {
     "cd": "分片号",
     "mosaic": "有码无码",
     "definition": "画质",
+    "ext": "扩展名",
+    "resolution": "分辨率",
+    "codec": "视频编码",
+    "fps": "帧率",
+    "duration": "时长",
+    "size": "体积",
+    "orig": "原文件名",
+    "seq": "序号",
 }
 
 EXAMPLE_VALUES = {
     "code": "ABC-123", "title": "标题", "studio": "厂牌", "series": "系列",
     "year": "2024", "actors": "甲、乙", "cd": "2", "mosaic": "无码", "definition": "1080p",
+    "ext": "mp4", "resolution": "1920x1080", "codec": "hevc", "fps": "29.97",
+    "duration": "1-23-45", "size": "1.2GB", "orig": "原文件名", "seq": "001",
 }
 
 #: 单个路径组件的长度上限。Windows 的组件上限是 255 个字符，但长名字在资源管理器、

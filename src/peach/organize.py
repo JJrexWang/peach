@@ -123,16 +123,61 @@ def _definition(width, height) -> str:
     return ""
 
 
-def placeholder_values(row, performers: Sequence[str] = ()) -> dict[str, str]:
+def _format_fps(raw) -> str:
+    """帧率去掉无意义的尾零：29.97 写 `29.97`，整数帧率写 `30`。取不到给空串。"""
+    try:
+        value = float(raw or 0)
+    except (TypeError, ValueError):
+        return ""
+    if value <= 0:
+        return ""
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _format_duration(raw) -> str:
+    """时长写成 `H-MM-SS`，不足一小时写 `MM-SS`；未知或非正给空串。"""
+    try:
+        seconds = int(float(raw or 0))
+    except (TypeError, ValueError):
+        return ""
+    if seconds <= 0:
+        return ""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}-{minutes:02d}-{secs:02d}"
+    return f"{minutes:02d}-{secs:02d}"
+
+
+def _format_size(raw) -> str:
+    """体积写成一位小数的人类可读形式，如 `1.2GB`；未知或非正给空串。"""
+    try:
+        amount = float(raw or 0)
+    except (TypeError, ValueError):
+        return ""
+    if amount <= 0:
+        return ""
+    for factor, unit in ((1024 ** 3, "GB"), (1024 ** 2, "MB"), (1024, "KB")):
+        if amount >= factor:
+            return f"{amount / factor:.1f}{unit}"
+    return f"{int(amount)}B"
+
+
+def placeholder_values(row, performers: Sequence[str] = (), seq: str = "") -> dict[str, str]:
     """一行资产的占位符取值，全部来自 approved 真相字段。
 
     候选表一个都不查：整理会改文件系统，而文件系统上没有地方记「这个名字是猜的」。
+    `seq` 不是资产自己的字段，而是这一批计划里的顺序号，由 `build_plan` 按行序传入。
     """
     code = str(row["code"] or "")
     name = str(row["name"] or "")
     title = str(row["catalog_title"] or "") or str(row["original_title"] or "")
     release_date = str(row["release_date"] or "")
     marker = part_marker(name)
+    try:
+        width, height = int(row["width"] or 0), int(row["height"] or 0)
+    except (TypeError, ValueError):
+        width, height = 0, 0
     return {
         "code": normalise_code_key(code) if is_jav_code(code) else code.strip(),
         "title": title.strip(),
@@ -146,6 +191,16 @@ def placeholder_values(row, performers: Sequence[str] = ()) -> dict[str, str]:
         # 在普通片上整段消失，而不是写上一个猜出来的「有码」。
         "mosaic": "无码" if is_uncensored_release(name, code) else "",
         "definition": _definition(row["width"], row["height"]),
+        # 下面是文件自身的事实（扩展名、媒体参数、体积），同样取不到就留空，
+        # 让可选分组整段消失，而不是把未知写进文件名。
+        "ext": _extension(name).lstrip(".").lower(),
+        "resolution": f"{width}x{height}" if width > 0 and height > 0 else "",
+        "codec": str(row["vcodec"] or "").strip(),
+        "fps": _format_fps(row["fps"]),
+        "duration": _format_duration(row["duration"]),
+        "size": _format_size(row["size"]),
+        "orig": ntpath.splitext(name)[0] if name else "",
+        "seq": seq,
     }
 
 
@@ -176,7 +231,8 @@ def _rows(connection: sqlite3.Connection, location: str,
         return []
     return connection.execute(
         "SELECT id,location,path,name,code,catalog_title,original_title,studio,series,"
-        f"release_date,width,height FROM asset WHERE location=? AND {ACTIVE_ASSET_SQL} "
+        "release_date,width,height,size,duration,vcodec,fps "
+        f"FROM asset WHERE location=? AND {ACTIVE_ASSET_SQL} "
         f"AND medium='video' AND path IS NOT NULL AND trim(path)<>''{selected} ORDER BY id",
         (location, *ids),
     ).fetchall()
@@ -261,7 +317,10 @@ def build_plan(connection: sqlite3.Connection, *, location: str,
     claimed = {str(path).casefold(): int(aid) for aid, path in connection.execute(
         'SELECT id,path FROM asset WHERE location=? AND path IS NOT NULL', (location,))}
 
-    for row in rows:
+    # 序号按计划行序（`_rows` 的 ORDER BY id）从 1 编号，宽度至少 3 位、随总数变宽，
+    # 保证同一批里字典序和数值序一致。离线整批跳过时循环走不到这里，不占号。
+    seq_width = max(3, len(str(len(rows))))
+    for position, row in enumerate(rows, 1):
         path = str(row["path"])
         matched, index, _tail = resolve_root(path, declared)
         if matched != location or index < 0:
@@ -271,7 +330,8 @@ def build_plan(connection: sqlite3.Connection, *, location: str,
         if root_states is not None and not root_states[index]:
             skip(row, SKIP_OFFLINE)
             continue
-        values = placeholder_values(row, performers.get(int(row["id"]), []))
+        values = placeholder_values(row, performers.get(int(row["id"]), []),
+                                    seq=str(position).zfill(seq_width))
         current_dir = ntpath.dirname(path)
         target_dir = current_dir
         missing: set[str] = set()
@@ -336,6 +396,15 @@ def latest_batch(root: Path | str) -> Path | None:
     """最近一个批次日志；一次都没执行过返回 None。"""
     logs = sorted(batch_log_dir(root).glob("organize-*.json"))
     return logs[-1] if logs else None
+
+
+def list_batches(root: Path | str) -> list[str]:
+    """全部历史批次日志的文件名，最新在前。
+
+    批次文件名里就是时间戳，字典序即时间序，所以排序取倒序即可，不必逐个读内容。
+    """
+    logs = sorted(batch_log_dir(root).glob("organize-*.json"), reverse=True)
+    return [log.name for log in logs]
 
 
 def _media_path(raw):
@@ -503,6 +572,6 @@ def rollback_batch(connection: sqlite3.Connection, log_path: Path | str, *,
 __all__ = [
     "MAX_PATH", "PLAN_FIELDS", "PRESETS", "VERIFIED_RENAME_LOCATIONS", "OrganizeError",
     "TemplateError", "UnverifiedRename", "apply_plan", "batch_log_dir", "build_plan",
-    "latest_batch", "placeholder_values", "plan_path", "refuse_unverified", "rollback_batch",
+    "latest_batch", "list_batches", "placeholder_values", "plan_path", "refuse_unverified", "rollback_batch",
     "unverified_location", "verified_renames", "write_plan",
 ]

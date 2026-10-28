@@ -77,6 +77,67 @@ class TemplateRenderTests(unittest.TestCase):
                 self.assertEqual("/".join(filter(None, (directory, filename + ".mp4"))), preset["example"])
 
 
+class NewPlaceholderTests(unittest.TestCase):
+    """增强版新增占位符：媒体参数与文件事实的取值、格式化与序号。"""
+
+    COLUMNS = ("code,name,catalog_title,original_title,studio,series,release_date,"
+               "width,height,size,duration,vcodec,fps")
+
+    def _row(self, **fields):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            "CREATE TABLE asset (code TEXT, name TEXT, catalog_title TEXT, original_title TEXT,"
+            " studio TEXT, series TEXT, release_date TEXT, width INTEGER, height INTEGER,"
+            " size INTEGER, duration REAL, vcodec TEXT, fps REAL)")
+        values = {"code": "ABC-123", "name": "ABC-123 原始名.MP4", "catalog_title": "标题",
+                  "original_title": "", "studio": "厂牌", "series": "", "release_date": "2024-01-01",
+                  "width": 1920, "height": 1080, "size": int(1.2 * 1024 ** 3),
+                  "duration": 5025, "vcodec": " hevc ", "fps": 29.97, **fields}
+        connection.execute(
+            f"INSERT INTO asset({self.COLUMNS}) VALUES ({','.join('?' * len(values))})",
+            tuple(values[column] for column in self.COLUMNS.split(",")))
+        return connection.execute("SELECT * FROM asset").fetchone()
+
+    def test_media_and_file_values(self):
+        values = organize.placeholder_values(self._row(), seq="007")
+        self.assertEqual(values["ext"], "mp4")
+        self.assertEqual(values["resolution"], "1920x1080")
+        self.assertEqual(values["codec"], "hevc")
+        self.assertEqual(values["fps"], "29.97")
+        self.assertEqual(values["duration"], "1-23-45")
+        self.assertEqual(values["size"], "1.2GB")
+        self.assertEqual(values["orig"], "ABC-123 原始名")
+        self.assertEqual(values["seq"], "007")
+        text, missing = render("{seq} {code}[ {resolution}][ {codec}]", values)
+        self.assertFalse(missing)
+        self.assertEqual(text, "007 ABC-123 1920x1080 hevc")
+
+    def test_formatting_edges_and_empty_values(self):
+        values = organize.placeholder_values(
+            self._row(width=0, height=None, duration=0, fps=30.0, size=512, vcodec=" "))
+        self.assertEqual(values["resolution"], "")
+        self.assertEqual(values["duration"], "")
+        self.assertEqual(values["fps"], "30")
+        self.assertEqual(values["size"], "512B")
+        self.assertEqual(values["codec"], "")
+        values = organize.placeholder_values(self._row(duration=605, size=int(3.5 * 1024 ** 2)))
+        self.assertEqual(values["duration"], "10-05")
+        self.assertEqual(values["size"], "3.5MB")
+
+    def test_plan_numbers_rows_in_id_order(self):
+        holder = Path(tempfile.mkdtemp(prefix="peach-organize-seq-")).resolve()
+        self.addCleanup(lambda: __import__("shutil").rmtree(holder, ignore_errors=True))
+        db_path = fresh_ledger(holder)
+        _seed(db_path, [
+            dict(id=9, path='R:\\media\\b.mp4', name='b.mp4', code='ABC-002'),
+            dict(id=5, path='R:\\media\\a.mp4', name='a.mp4', code='ABC-001'),
+        ])
+        plan = _plan(db_path, file_template="{seq}-{code}")
+        targets = [row["target_path"] for row in plan["rows"]]
+        self.assertEqual(targets, ["R:\\media\\001-ABC-001.mp4", "R:\\media\\002-ABC-002.mp4"])
+
+
 class SanitiseTests(unittest.TestCase):
     def test_filename_symbols_and_invalid_unicode_are_removed(self):
         cases = {

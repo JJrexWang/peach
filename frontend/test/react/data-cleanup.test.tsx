@@ -93,9 +93,11 @@ const withoutRoots: MediaSourcesData = {
 const organizeIdle: OrganizeData = {
   status: 'idle', locations: [{ location: 'local', roots: ['R:\\media'] }],
   templates: { local: { file: '{code}', dir: '' } },
+  schemes: [],
   presets: [{ label: '番号 + 标题', file: '{code}[ {title}]', dir: '{studio}' }],
   placeholders: [{ key: 'code', label: '番号' }, { key: 'title', label: '标题' }],
   last_batch: '',
+  batches: [],
 };
 
 /** 整页首屏要的每一条端点。 */
@@ -726,43 +728,44 @@ describe('整理', () => {
   });
 
   it('底栏回滚在左、预览居中、执行整理在最右；只有执行整理在场时预览才退成次级', async () => {
-    organizeServer({ ...organizeIdle, last_batch: 'batch-9' });
-    queryClient.setQueryData(['organize'], { ...organizeIdle, last_batch: 'batch-9' });
+    organizeServer({ ...organizeIdle, last_batch: 'batch-9', batches: ['batch-9'] });
+    queryClient.setQueryData(['organize'], { ...organizeIdle, last_batch: 'batch-9', batches: ['batch-9'] });
     const host = await wrap(<OrganizeCard toast={vi.fn()} failure={vi.fn()} />);
     const footer = () => host.querySelector('[data-cleanup-organize] footer');
-    expect(actionOrder(footer())).toEqual(['回滚上一批', '预览']);
+    expect(actionOrder(footer())).toEqual(['batch-9', '回滚所选批次', '预览']);
     expect(buttonNamed('预览', host)!.className).toContain('bg-button-primary');
     await click(buttonNamed('预览', host));
     await settle();
-    expect(actionOrder(footer())).toEqual(['回滚上一批', '预览', '执行整理']);
+    expect(actionOrder(footer())).toEqual(['batch-9', '回滚所选批次', '预览', '执行整理']);
     expect(buttonNamed('预览', host)!.className).not.toContain('bg-button-primary');
     expect(buttonNamed('执行整理', host)!.className).toContain('bg-button-primary');
   });
 
-  it('有上一批才给回滚；回滚也先确认，取消就不发', async () => {
+  it('有批次才给回滚；回滚也先确认，确认文案带所选批次，取消就不发', async () => {
     const seen = confirmWith(false);
-    const server = organizeServer({ ...organizeIdle, last_batch: 'batch-9' });
-    queryClient.setQueryData(['organize'], { ...organizeIdle, last_batch: 'batch-9' });
+    const server = organizeServer({ ...organizeIdle, last_batch: 'batch-9', batches: ['batch-9'] });
+    queryClient.setQueryData(['organize'], { ...organizeIdle, last_batch: 'batch-9', batches: ['batch-9'] });
     const host = await wrap(<OrganizeCard toast={vi.fn()} failure={vi.fn()} />);
-    await click(buttonNamed('回滚上一批', host));
+    await click(buttonNamed('回滚所选批次', host));
     await settle();
-    expect(seen.map((options) => options.title)).toEqual(['回滚上一批整理']);
+    expect(seen.map((options) => options.title)).toEqual(['回滚整理批次']);
+    expect(seen[0]!.body).toContain('batch-9');
     expect(server.posts('/api/organize/rollback')).toEqual([]);
     expect(server.posts('/api/organize/apply')).toEqual([]);
 
     queryClient.clear();
     queryClient.setQueryData(['organize'], organizeIdle);
     const fresh = await wrap(<OrganizeCard toast={vi.fn()} failure={vi.fn()} />);
-    expect(buttonNamed('回滚上一批', fresh)).toBeNull();
+    expect(buttonNamed('回滚所选批次', fresh)).toBeNull();
   });
 
-  it('回滚确认了才发，请求体只有 confirm', async () => {
+  it('回滚确认了才发，请求体带 confirm 与所选批次', async () => {
     confirmWith(true);
-    const server = organizeServer({ ...organizeIdle, last_batch: 'batch-9' });
-    queryClient.setQueryData(['organize'], { ...organizeIdle, last_batch: 'batch-9' });
+    const server = organizeServer({ ...organizeIdle, last_batch: 'batch-9', batches: ['batch-9'] });
+    queryClient.setQueryData(['organize'], { ...organizeIdle, last_batch: 'batch-9', batches: ['batch-9'] });
     const host = await wrap(<OrganizeCard toast={vi.fn()} failure={vi.fn()} />);
-    await click(buttonNamed('回滚上一批', host));
+    await click(buttonNamed('回滚所选批次', host));
     await settle();
-    expect(server.posts('/api/organize/rollback')).toEqual([{ confirm: true }]);
+    expect(server.posts('/api/organize/rollback')).toEqual([{ confirm: true, batch: 'batch-9' }]);
   });
 });

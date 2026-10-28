@@ -24,6 +24,9 @@ export const fetchOrganizeExample = (file: string, dir: string, signal?: AbortSi
 
 export interface OrganizeTemplate { file: string; dir: string }
 
+/** 一套存档的命名方案：名字加上两份模板。在整理卡的「我的方案」里整表回写设置端点。 */
+export interface OrganizeScheme extends OrganizeTemplate { name: string }
+
 export interface OrganizeJob {
   status: 'idle' | 'running' | 'complete' | 'failed';
   job_id?: string;
@@ -41,9 +44,12 @@ export interface OrganizeJob {
 export interface OrganizeData extends OrganizeJob {
   locations: { location: string; roots: string[] }[];
   templates: Record<string, OrganizeTemplate>;
+  schemes: OrganizeScheme[];
   presets: ({ label: string; example?: string } & OrganizeTemplate)[];
   placeholders: { key: string; label: string }[];
   last_batch: string;
+  /** 全部历史批次的文件名，最新在前；回滚下拉按这个列表选批次。 */
+  batches: string[];
 }
 
 export interface OrganizePlanRow { current_path: string; target_path: string; action: string }
@@ -60,8 +66,9 @@ export interface OrganizePlan {
 /** 这一次要整理什么：来源与两份模板。 */
 export interface OrganizeRequest { location: string; file_template: string; dir_template: string; path: string }
 
-/** 执行还是回滚。两条都起同一个后台任务，结果落在同一格里。 */
-export type OrganizeCommand = { kind: 'apply'; request: OrganizeRequest } | { kind: 'rollback' };
+/** 执行还是回滚。两条都起同一个后台任务，结果落在同一格里。回滚可带所选批次，
+ *  不带就是服务端默认的上一批。 */
+export type OrganizeCommand = { kind: 'apply'; request: OrganizeRequest } | { kind: 'rollback'; batch?: string };
 
 export const fetchOrganize = (signal?: AbortSignal) => apiGet<OrganizeData>(ORGANIZE_URL, signal);
 
@@ -76,7 +83,14 @@ export const pickOrganizeFolder = (initial: string) => apiSend<{ path: string | 
 
 export const startOrganize = (command: OrganizeCommand) => command.kind === 'apply'
   ? apiSend<OrganizeJob>(ORGANIZE_APPLY_URL, { ...command.request, confirm: true })
-  : apiSend<OrganizeJob>(ORGANIZE_ROLLBACK_URL, { confirm: true });
+  : apiSend<OrganizeJob>(ORGANIZE_ROLLBACK_URL, { confirm: true, ...(command.batch ? { batch: command.batch } : {}) });
+
+/** 保存整份命名方案存档：与模板同一个设置端点、整表回写。先写服务端再换缓存，
+ *  写失败时缓存里还是旧的那份，调用方能把失败报出来。 */
+export async function saveOrganizeSchemes(schemes: OrganizeScheme[]): Promise<void> {
+  await apiSend(SETTINGS_URL, { organizeSchemes: schemes });
+  queryClient.setQueryData<OrganizeData>(ORGANIZE_KEY, (data) => (data ? { ...data, schemes } : data));
+}
 
 /** 确认执行的那一刻存下模板：下次进这一页看到的是自己上次执行用的那两行，而不是又一次
  *  空框。预览不存，试过又放弃的模板不会顶掉上一次的。存不进去不该挡住已经起跑的整理，所以失败不报。 */

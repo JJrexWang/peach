@@ -15,6 +15,7 @@ import {
 } from './controls';
 import { disposePlayer } from './dispose';
 import { playerHost } from './host';
+import { createHotkeyHandler } from './hotkeys';
 import { mountImmersePlayer, type ImmersePlayerOptions } from './immerse-player';
 import { wirePlayerContextMenu } from './menu';
 import { detailPlayer, setDetailPlayer } from './registry';
@@ -97,6 +98,8 @@ export async function mountDetailPlayer(
   }
   const player = videojs(video, {
     controls: true, preload: 'metadata', language: 'zh-CN', responsive: true,
+    /* 快捷键定制：键位每次按键时从本地读，设置页改完下次打开播放器生效。 */
+    userActions: { hotkeys: createHotkeyHandler() },
     /* 海报与作品当前封面偏好一致，交给原生视频显示。 */
     poster: options.poster || detailPosterUrl(item, host.settings().javImage),
     controlBar: {
