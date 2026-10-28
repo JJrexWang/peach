@@ -47,6 +47,7 @@ it('播放器菜单只列检测到的程序和通用网络播放方式', async (
   await click(host.querySelector('[aria-label="外部播放器"]'));
   expect([...document.querySelectorAll('[role="option"]')].map(node => node.textContent?.trim())).toEqual([
     '系统默认播放器', 'PotPlayer', 'M3U 播放列表', '网络播放地址 / VR',
+    'VLC（iPhone / iPad）', 'VLC（Android）', 'VLC 桌面版（需启动器）',
   ]);
 });
 
@@ -87,6 +88,26 @@ it('M3U 与本机播放器共用打开入口，切换方式时清除网络地址
   expect(host.querySelector('input')?.value).toContain('/external-stream/9?ticket=short');
   await choose(host.querySelector('[aria-label="外部播放器"]'), '系统默认播放器');
   expect(host.querySelector('input')).toBeNull();
+});
+
+it('VLC 移动端走协议链接，桌面启动器带本机续播位置', async () => {
+  const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(url === '/api/local-players'
+    ? { players: [] }
+    : { url: '/external-stream/9?ticket=short', playlist: '/external-playlist/9.m3u?ticket=short' })));
+  vi.stubGlobal('fetch', fetcher);
+  const openedUrls: string[] = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    openedUrls.push(this.href);
+  });
+  const host = await mount(<ExternalPlayback id={9} />);
+  await settle();
+  await choose(host.querySelector('[aria-label="外部播放器"]'), 'VLC（iPhone / iPad）');
+  await click(host.querySelector('[aria-label="使用外部播放器打开"]'));
+  expect(openedUrls.at(-1)).toBe(`vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(`${location.origin}/external-stream/9?ticket=short`)}`);
+  localStorage.setItem('peach.playback-position.v1:item:9', '125.9');
+  await choose(host.querySelector('[aria-label="外部播放器"]'), 'VLC 桌面版（需启动器）');
+  await click(host.querySelector('[aria-label="使用外部播放器打开"]'));
+  expect(openedUrls.at(-1)).toBe(`peachvlc://play?url=${encodeURIComponent(`${location.origin}/external-stream/9?ticket=short`)}&t=125`);
 });
 
 it('本机检测失败时保留网络方式，重新检测后可以选择本机播放器', async () => {

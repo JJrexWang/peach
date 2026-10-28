@@ -7,7 +7,35 @@ import { ErrorText, Help } from '../settings/section';
 import { busyProps, useAction } from '../settings/use-action';
 
 const TARGET_KEY = 'peach.playback-target.v1';
-const NETWORK_TARGETS = [['m3u', 'M3U 播放列表'], ['url', '网络播放地址 / VR']] as const;
+const NETWORK_TARGETS = [
+  ['m3u', 'M3U 播放列表'],
+  ['url', '网络播放地址 / VR'],
+  ['vlc-ios', 'VLC（iPhone / iPad）'],
+  ['vlc-android', 'VLC（Android）'],
+  ['peachvlc', 'VLC 桌面版（需启动器）'],
+] as const;
+
+/** 续播位置与网页播放器共用同一份浏览器本地记录（player/progress.ts 的键格式）；
+ *  只在同一浏览器里存在，跨设备打开时自然回退为从头播放。 */
+function resumeSeconds(id: number): number {
+  try {
+    const raw = localStorage.getItem(`peach.playback-position.v1:item:${id}`);
+    const time = raw === null ? NaN : Number(raw);
+    return Number.isFinite(time) && time > 5 ? Math.floor(time) : 0;
+  } catch { return 0 }
+}
+
+function vlcAndroidLink(url: string): string {
+  const parsed = new URL(url);
+  return `intent://${parsed.host}${parsed.pathname}${parsed.search}#Intent;scheme=${parsed.protocol.replace(':', '')};package=org.videolan.vlc;end`;
+}
+
+function targetLink(player: string, links: { url: string; playlist: string }, id: number): string {
+  if (player === 'vlc-ios') return `vlc-x-callback://x-callback-url/stream?url=${encodeURIComponent(links.url)}`;
+  if (player === 'vlc-android') return vlcAndroidLink(links.url);
+  if (player === 'peachvlc') return `peachvlc://play?url=${encodeURIComponent(links.url)}&t=${resumeSeconds(id)}`;
+  return links.playlist;
+}
 
 function savedTarget() {
   try { return localStorage.getItem(TARGET_KEY) || `local:${localStorage.getItem('peach.local-player.v1') || 'default'}` }
@@ -55,7 +83,7 @@ export function ExternalPlayback({ id, onOpened }: { id: number; onOpened?(): vo
     setLinks(result);
     if (player === 'url') return;
     const link = document.createElement('a');
-    link.href = result.playlist;
+    link.href = targetLink(player, result, id);
     link.rel = 'noreferrer';
     document.body.append(link);
     link.click();
@@ -77,6 +105,7 @@ export function ExternalPlayback({ id, onOpened }: { id: number; onOpened?(): vo
     {action.error || loadError ? <ErrorText>{action.error || loadError}</ErrorText> : null}
     {loadError ? <Button variant="secondary" disabled={!!action.busy}
       onClick={() => { setLoadError(''); setPlayers(null); setEpoch(value => value + 1) }}>重新检测播放器</Button> : null}
+    {player === 'peachvlc' ? <Help>VLC 桌面版需先安装 peachvlc 启动器（见 fork 仓库 tools/peachvlc-launcher）；点击「打开」会带上本浏览器的续播位置。</Help> : null}
     {links ? <>
       <Input label="网络播放地址" value={links.url} isReadOnly />
       <Help>链接有效期为 6 小时。VR 播放器可使用网络播放地址；另一台设备需要能访问当前 Peach 地址。</Help>
