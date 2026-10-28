@@ -46,7 +46,8 @@ jobs:
       - name: 计算版本标签
         id: ver
         run: |
-          v=$(python3 -c "import re,pathlib; print(re.search(r'__version__ = "([^"]+)"', pathlib.Path('src/peach/__init__.py').read_text()).group(1))")
+          v=$(grep '^__version__' src/peach/__init__.py | cut -d'"' -f2)
+          test -n "$v"
           echo "tags=ghcr.io/jjrexwang/peach-enhanced:enhanced,ghcr.io/jjrexwang/peach-enhanced:${v}-enhanced.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
       - name: 发布镜像
         uses: docker/build-push-action@v7
