@@ -16,6 +16,7 @@ import {
 import { disposePlayer } from './dispose';
 import { playerHost } from './host';
 import { createHotkeyHandler } from './hotkeys';
+import { mountPressSpeed } from './press-speed';
 import { mountImmersePlayer, type ImmersePlayerOptions } from './immerse-player';
 import { wirePlayerContextMenu } from './menu';
 import { detailPlayer, setDetailPlayer } from './registry';
@@ -113,6 +114,8 @@ export async function mountDetailPlayer(
   player.peachItem = item;
   player.peachPlaybackKey = options.playbackKey || playbackKey('item', item);
   wirePlayerContextMenu(player);
+  /* 长按画面临时 2 倍速：只改当下倍速，不写播放记忆，dispose 时自解绑。 */
+  mountPressSpeed(player, video);
   /* 手机上的画面格按视频自己的比例排（`--peach-video-ratio`）。 */
   player.on('loadedmetadata', () => {
     const tech = player.el()?.querySelector('video');

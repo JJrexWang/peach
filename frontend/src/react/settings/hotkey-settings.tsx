@@ -10,15 +10,16 @@ import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 
 import {
-  DEFAULT_HOTKEYS, loadHotkeys, resetHotkeys, saveHotkeys,
-  type HotkeyAction, type HotkeyMap,
+  DEFAULT_HOTKEYS, DEFAULT_SEEK_STEPS, loadHotkeys, loadSeekSteps, parseSeekSteps,
+  resetHotkeys, resetSeekSteps, saveHotkeys, saveSeekSteps, SEEK_STEP_LIMITS,
+  type HotkeyAction, type HotkeyMap, type SeekSteps,
 } from '../../player/hotkeys';
 import { Help, Rows, Section, Stack } from './section';
 
 const ACTION_LABELS: [HotkeyAction, string][] = [
   ['playPause', '播放 / 暂停'],
-  ['seekBack', '后退 10 秒'],
-  ['seekForward', '前进 10 秒'],
+  ['seekBack', '快退'],
+  ['seekForward', '快进'],
   ['volumeUp', '音量 +'],
   ['volumeDown', '音量 −'],
   ['mute', '静音'],
@@ -37,6 +38,25 @@ export function hotkeyLabel(key: string): string {
 export function HotkeySettings({ receipt }: { receipt(message: string): void }) {
   const [keys, setKeys] = useState<HotkeyMap>(() => loadHotkeys());
   const [recording, setRecording] = useState<HotkeyAction | null>(null);
+  const [steps, setSteps] = useState<SeekSteps>(() => loadSeekSteps());
+  const [smallDraft, setSmallDraft] = useState(() => String(loadSeekSteps().small));
+  const [largeDraft, setLargeDraft] = useState(() => String(loadSeekSteps().large));
+
+  /* 步长在失焦或回车时落盘：parseSeekSteps 负责取整与夹边界，
+   * 输入框随即回显夹过的值，用户一眼就知道实际生效的是多少。 */
+  const commitSteps = () => {
+    const next = parseSeekSteps({ small: smallDraft, large: largeDraft });
+    setSteps(next);
+    setSmallDraft(String(next.small));
+    setLargeDraft(String(next.large));
+    saveSeekSteps(next);
+    receipt('已保存快进/快退步长，下次打开播放器生效');
+  };
+  const stepInput = (label: string, draft: string, setDraft: (value: string) => void) => (
+    <Input type="number" inputMode="numeric" autoComplete="off" aria-label={label}
+      className="w-24" value={draft} onChange={setDraft} onBlur={commitSteps}
+      onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitSteps() } }} />
+  );
 
   /* 录入中：下一个按下的键就是新键位。修饰键单独按不算（那是组合键的前半段），
    * Escape 取消。捕获阶段收，免得这个键先被页面上其他快捷键吃掉。 */
@@ -62,9 +82,13 @@ export function HotkeySettings({ receipt }: { receipt(message: string): void }) 
 
   const restoreDefaults = () => {
     resetHotkeys();
+    resetSeekSteps();
     setKeys({ ...DEFAULT_HOTKEYS });
+    setSteps({ ...DEFAULT_SEEK_STEPS });
+    setSmallDraft(String(DEFAULT_SEEK_STEPS.small));
+    setLargeDraft(String(DEFAULT_SEEK_STEPS.large));
     setRecording(null);
-    receipt('已恢复默认快捷键，下次打开播放器生效');
+    receipt('已恢复默认快捷键与步长，下次打开播放器生效');
   };
 
   return (
@@ -82,10 +106,21 @@ export function HotkeySettings({ receipt }: { receipt(message: string): void }) 
             </div>
           </SettingsRow>
         ))}
+        <SettingsRow label="快进/快退步长 · 小步长（秒）">
+          {stepInput('快进/快退小步长（秒）', smallDraft, setSmallDraft)}
+        </SettingsRow>
+        <SettingsRow label="快进/快退步长 · 大步长（秒）">
+          {stepInput('快进/快退大步长（秒）', largeDraft, setLargeDraft)}
+        </SettingsRow>
       </Rows>
       <Stack divided>
+        <Help>
+          {`普通快退/快进键走小步长（当前 ${steps.small} 秒），按住 Shift 再按走大步长（当前 ${steps.large} 秒）；`
+            + `小步长可填 ${SEEK_STEP_LIMITS.small.min}–${SEEK_STEP_LIMITS.small.max} 秒，大步长可填 `
+            + `${SEEK_STEP_LIMITS.large.min}–${SEEK_STEP_LIMITS.large.max} 秒。播放器控制栏上的快退/快进按钮走小步长。`}
+        </Help>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Help>空格始终可播放 / 暂停。键位只保存在这台设备的浏览器里。</Help>
+          <Help>空格始终可播放 / 暂停。键位与步长只保存在这台设备的浏览器里。</Help>
           <Button variant="secondary" size="small" onClick={restoreDefaults}>恢复默认</Button>
         </div>
       </Stack>

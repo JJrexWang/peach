@@ -10,6 +10,7 @@ import { PLAYER_PANEL_EVENT } from './stats';
 import type { PlayerItem, SourceQuality, VjsPlayer } from './types';
 import { SubtitleControls, subtitleIcon } from './subtitles';
 import { timelineFrame, type TimelineSheets } from './timeline';
+import { loadSeekSteps, seekPlayerBy } from './hotkeys';
 import { mountPlayerRotation } from './rotation';
 import { mountPlayerPipControl } from './pip';
 import { mountPlaybackRate, playerMemory } from './memory';
@@ -383,6 +384,7 @@ export function mountPlayerQualityControl(
   });
   qualityRows();
   mountPlayerTheaterControl(player, root);
+  mountPlayerSeekControls(player);
   mountPlayerChromeLayout(player);
   return (next) => { sourceQualities = next?.length ? next : null; refreshPanel() };
 }
@@ -398,6 +400,36 @@ function mountPlayerTheaterControl(player: VjsPlayer, settingsRoot: Element): vo
   theaterSyncs.set(theaterButton, playerControlTooltip(theaterButton, '影院模式', 'T'));
   syncPlayerTheaterButton(theaterButton);
   theaterButton.onclick = (event) => { event.stopPropagation(); applyTheaterMode(!playerHost().settings().theaterMode) };
+}
+
+/** 快退/快进一对标准按钮，紧挨播放键右侧：手机上没有键盘，这两个按钮就是
+ *  快进快退的正门（不做双击手势）。步长是设置里的「小步长」，挂载时读一次；
+ *  改了步长，下次打开播放器生效，和快捷键同一套规矩。图标沿用全站既定的
+ *  快退/快进符号（媒体卡预览同款 rotate-ccw / rotate-cw）。 */
+export function mountPlayerSeekControls(player: VjsPlayer): void {
+  const controlBar = player.el().querySelector<HTMLElement>('.vjs-control-bar');
+  if (!controlBar || controlBar.querySelector('[data-player-seek]')) return;
+  const { small } = loadSeekSteps();
+  const make = (direction: -1 | 1): HTMLElement => {
+    const root = document.createElement('div');
+    root.className = 'vjs-peach-seek vjs-control';
+    root.dataset.playerSeek = direction < 0 ? 'back' : 'forward';
+    root.innerHTML = `<button type="button" data-player-seek-button>${icon(direction < 0 ? 'rotate-ccw' : 'rotate-cw')}</button>`
+      + '<span class="vjs-peach-hover" aria-hidden="true"></span>';
+    const button = root.querySelector('button')!;
+    playerControlTooltip(button, direction < 0 ? `快退 ${small} 秒` : `快进 ${small} 秒`);
+    button.onclick = (event) => { event.stopPropagation(); seekPlayerBy(player, direction * small) };
+    return root;
+  };
+  const back = make(-1), forward = make(1);
+  const play = controlBar.querySelector<HTMLElement>(':scope>.vjs-play-control');
+  if (play) {
+    play.insertAdjacentElement('afterend', forward);
+    play.insertAdjacentElement('afterend', back);
+  } else {
+    controlBar.prepend(forward);
+    controlBar.prepend(back);
+  }
 }
 
 function mountPlayerChromeLayout(player: VjsPlayer): void {

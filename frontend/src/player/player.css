@@ -98,6 +98,22 @@ video.video-js{vertical-align:top;font-size:10px;line-height:1;font-family:Arial
 /* 上游 delhi-modern 的播放键是 56px 圆里放一个 36px 的图标框（`svg{padding:10px}`），
    图标本体 26 个单位。Peach 的键是 40px，同比例给 26px 的框，画出来 18.6px。 */
 [data-stage-media] .video-js .vjs-control-bar>.vjs-play-control>.vjs-peach-control-icon{width:26px;height:26px}
+/* 快退/快进标准按钮：与播放键同高同底色的 40px 圆钮，排在播放键右侧。
+   它们是普通 .vjs-control，控制栏亮起时跟着一起亮，触屏点得到。 */
+.video-js .vjs-control-bar>.vjs-peach-seek>button{position:relative;z-index:1;width:100%;height:100%;margin:0;padding:0;
+  border:0;background:transparent;color:inherit;display:grid;place-items:center;cursor:pointer}
+.video-js .vjs-control-bar>.vjs-peach-seek>button>svg{width:20px;height:20px;display:block;fill:currentColor;
+  filter:drop-shadow(0 0 1px rgba(0,0,0,.8));pointer-events:none}
+[data-stage-media] .video-js .vjs-control-bar>.vjs-peach-seek{position:relative;align-self:flex-end;flex:0 0 40px;
+  width:40px;height:40px;margin:0 0 8px 8px;border:0;border-radius:50%;background:rgba(0,0,0,.6);overflow:visible}
+[data-stage-media] .video-js .vjs-control-bar>.vjs-peach-seek>.vjs-peach-hover{inset:4px;width:auto;height:auto;border-radius:50%}
+[data-stage-media] .video-js .vjs-control-bar>.vjs-peach-seek:hover>.vjs-peach-hover,
+[data-stage-media] .video-js .vjs-control-bar>.vjs-peach-seek:focus-within>.vjs-peach-hover{background:rgba(255,255,255,.1)}
+[data-stage-media] .video-js .vjs-control-bar>.vjs-peach-seek:active>.vjs-peach-hover{background:rgba(255,255,255,.2)}
+/* 长按 2 倍速角标：只在临时倍速生效期间出现；按住期间关掉 iOS 长按呼出菜单。 */
+.vjs-peach-press-speed{position:absolute;z-index:20;top:12px;right:12px;padding:4px 10px;border-radius:var(--pill-radius);
+  background:rgba(0,0,0,.65);color:#fff;font-size:var(--fs-sm);font-weight:600;line-height:1.2;pointer-events:none}
+.video-js.vjs-peach-pressing{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 /* 播放↔暂停靠插值同一条路径完成，不是换图：上游那两条路径的记号结构逐位相同（233 个记号、
    116 个数字，命令序列都是 MLCCLCCLCCLCCZMLCCVCCLCCVLCCZ），所以浏览器插 `d` 得到的中间
    形状就是上游 `eST` 自己插出来的那些。不支持插值 `d` 的浏览器退回瞬间切换。 */

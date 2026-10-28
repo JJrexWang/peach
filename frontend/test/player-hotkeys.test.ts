@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  createHotkeyHandler, DEFAULT_HOTKEYS, HOTKEYS_STORAGE_KEY, loadHotkeys, matchHotkeyAction,
-  parseHotkeys, resetHotkeys, saveHotkeys,
+  createHotkeyHandler, DEFAULT_HOTKEYS, DEFAULT_SEEK_STEPS, HOTKEYS_STORAGE_KEY, loadHotkeys,
+  loadSeekSteps, matchHotkeyAction, parseHotkeys, parseSeekSteps, resetHotkeys, resetSeekSteps,
+  resolveSeek, saveHotkeys, saveSeekSteps, SEEK_STEPS_STORAGE_KEY,
 } from '../src/player/hotkeys';
 import type { VjsPlayer } from '../src/player/types';
 
@@ -50,6 +51,38 @@ describe('播放器快捷键匹配', () => {
     const custom = { ...DEFAULT_HOTKEYS, seekForward: 'l' };
     expect(matchHotkeyAction(custom, 'L')).toBe('seekForward');
     expect(matchHotkeyAction(custom, 'ArrowRight')).toBeNull();
+  });
+});
+
+describe('快进/快退两档步长', () => {
+  it('没存过时是小 10 秒、大 60 秒', () => {
+    expect(loadSeekSteps()).toEqual(DEFAULT_SEEK_STEPS);
+  });
+
+  it('保存读回一致，恢复默认后回到 10/60', () => {
+    saveSeekSteps({ small: 5, large: 120 });
+    expect(loadSeekSteps()).toEqual({ small: 5, large: 120 });
+    resetSeekSteps();
+    expect(loadSeekSteps()).toEqual(DEFAULT_SEEK_STEPS);
+    expect(localStorage.getItem(SEEK_STEPS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('取整并夹边界，坏值回默认', () => {
+    expect(parseSeekSteps({ small: 7.6, large: 90.2 })).toEqual({ small: 8, large: 90 });
+    expect(parseSeekSteps({ small: 0, large: 9999 })).toEqual({ small: 1, large: 600 });
+    expect(parseSeekSteps({ small: 'x', large: null })).toEqual(DEFAULT_SEEK_STEPS);
+    expect(parseSeekSteps(null)).toEqual(DEFAULT_SEEK_STEPS);
+    expect(parseSeekSteps({ small: '15' })).toEqual({ small: 15, large: 60 });
+  });
+
+  it('resolveSeek：普通键小步长，Shift 大步长，非 seek 键返回 null', () => {
+    const steps = { small: 5, large: 120 };
+    expect(resolveSeek(DEFAULT_HOTKEYS, 'ArrowRight', false, steps))
+      .toEqual({ action: 'seekForward', seconds: 5, large: false });
+    expect(resolveSeek(DEFAULT_HOTKEYS, 'ArrowLeft', true, steps))
+      .toEqual({ action: 'seekBack', seconds: 120, large: true });
+    expect(resolveSeek(DEFAULT_HOTKEYS, 'm', true, steps)).toBeNull();
+    expect(resolveSeek(DEFAULT_HOTKEYS, 'q', false, steps)).toBeNull();
   });
 });
 
@@ -117,6 +150,20 @@ describe('播放器快捷键处理', () => {
     const missed = keyEvent('q');
     handler(missed);
     expect(missed.defaultPrevented).toBe(false);
+  });
+
+  it('Shift+方向键走大步长，自定义步长即时生效', () => {
+    const { player, state } = fakePlayer();
+    const handler = createHotkeyHandler(player);
+    const shiftRight = new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true, cancelable: true });
+    handler(shiftRight);
+    expect(state.time).toBe(160);
+    saveSeekSteps({ small: 3, large: 30 });
+    handler(keyEvent('ArrowRight'));
+    expect(state.time).toBe(163);
+    const shiftLeft = new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true, cancelable: true });
+    handler(shiftLeft);
+    expect(state.time).toBe(133);
   });
 
   it('设置页保存的新键位下一次按键就生效', () => {
